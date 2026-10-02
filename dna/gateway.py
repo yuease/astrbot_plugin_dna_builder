@@ -1,12 +1,12 @@
 """
-数据源路由：本地数据包优先，接口兜底。
+数据源路由：本地数据包优先，在线查询兜底。
 
 三种模式（插件配置项 `data_source`）：
 
-- `auto`（默认）：数据包已就绪就用本地，否则先用接口回答，同时在后台把数据包下下来，
-  下好之后自动切到本地。这样用户第一次提问不会卡在 22MB 下载上，之后也不再打接口服务器。
+- `auto`（默认）：数据包已就绪就用本地，否则先用在线查询回答，同时在后台把数据包下下来，
+  下好之后自动切到本地。这样用户第一次提问不会卡在 22MB 下载上，之后也不再请求在线服务。
 - `pack`：只认本地数据包，没有就现下（首次查询会慢一次）。
-- `api`：只用实时接口（数据最新，但每次查询都打作者服务器）。
+- `api`：只用实时在线查询（数据最新，但每次查询都要联网）。
 
 对上层（工具 / 剧情检索）暴露的方法与 DnaClient 完全一致，切换数据源不影响工具代码。
 """
@@ -29,7 +29,7 @@ VALID_MODES = (MODE_AUTO, MODE_PACK, MODE_API)
 
 
 class DnaGateway:
-    """在数据包与接口之间路由，并保持与后端一致的方法签名。"""
+    """在数据包与在线查询之间路由，并保持与后端一致的方法签名。"""
 
     def __init__(
         self,
@@ -39,7 +39,7 @@ class DnaGateway:
         max_chars: int = 2600,
     ) -> None:
         """
-        @param api: 实时接口后端
+        @param api: 实时在线查询后端
         @param pack: 本地数据包后端（mode=api 时可为 None）
         @param mode: auto / pack / api
         @param max_chars: 工具返回字符上限
@@ -96,7 +96,7 @@ class DnaGateway:
             await self.pack.ensure()
             logger.info("DNA Builder 数据包已就绪：%s", self.pack.status())
         except Exception as exc:  # noqa: BLE001 - 后台任务不应抛到事件循环
-            logger.warning("DNA Builder 数据包下载失败，将继续使用接口：%s", exc)
+            logger.warning("DNA Builder 数据包下载失败，将继续使用在线查询：%s", exc)
 
     def _should_use_pack(self) -> bool:
         """本次调用是否走本地数据包。"""
@@ -107,13 +107,13 @@ class DnaGateway:
 
     async def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
         """
-        调用后端方法：本地优先、接口兜底；pack 模式下会先把数据包准备好。
+        调用后端方法：本地优先、在线查询兜底；pack 模式下会先把数据包准备好。
 
         @param method: 后端方法名
         @param args: 位置参数
         @param kwargs: 关键字参数
         @return: 后端返回值
-        @raises DnaError: 两个后端都失败时抛出接口侧的错误
+        @raises DnaError: 两个后端都失败时抛出在线查询侧的错误
         """
         pack_error: DnaError | None = None
 
@@ -131,7 +131,7 @@ class DnaGateway:
                 pack_error = exc
                 if self.mode == MODE_PACK:
                     raise
-                logger.warning("本地数据包查询失败，回退接口：%s", exc)
+                logger.warning("本地数据包查询失败，回退在线查询：%s", exc)
         else:
             self.start_warmup()
 

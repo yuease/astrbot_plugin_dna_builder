@@ -1,15 +1,15 @@
 """
 官方数据包本地后端。
 
-DNA Builder 的桌面版 / 移动端并不逐条查接口，而是下载一份官方数据包（zip 内是
+DNA Builder 的桌面版 / 移动端并不逐条在线查询，而是下载一份官方数据包（zip 内是
 msgpack 编好的各模块数据），本地解码后离线查询。本插件复刻这条路径：
 
 1. `GET {base}/versions.json` 取版本列表（几 KB，用来判断要不要更新）；
 2. 下载 `{base}/{version}.zip`（约 22 MB，Cloudflare CDN），落到插件数据目录缓存；
 3. 按需解出 `modules/<模块>.data.msgpack`，归一成记录表后本地检索。
 
-好处是查询不再打作者的接口服务器（只有版本检查与偶尔的数据包下载，走的是 CDN），
-代价是数据新鲜度以数据包发布为准（作者发版很勤，实测当天就有新包）。
+好处是查询不再请求在线服务（只有版本检查与偶尔的数据包下载，走的是 CDN），
+代价是数据新鲜度以数据包发布为准（官方发版很勤，实测当天就有新包）。
 解码实测：char 1.7ms、questchain 1.2ms、quest 31ms/20MB，完全够用。
 """
 
@@ -49,7 +49,7 @@ _LOCALE_SUFFIXES = ("en", "fr", "jp", "kr", "tc")
 
 
 class DnaPack:
-    """官方数据包的下载、缓存与查询实现（接口与 DnaClient 对齐）。"""
+    """官方数据包的下载、缓存与查询实现（行为与 DnaClient 对齐）。"""
 
     def __init__(
         self,
@@ -66,7 +66,7 @@ class DnaPack:
         @param timeout: 单次请求超时（秒）
         @param refresh_hours: 间隔多久去检查一次新版本
         @param max_mb: 允许下载的数据包体积上限（MB）
-        @param max_chars: 单次工具返回字符上限（与接口后端保持一致）
+        @param max_chars: 单次工具返回字符上限（与在线查询后端保持一致）
         """
         self.base = (base_url or DEFAULT_PACK_BASE_URL).rstrip("/") + "/"
         self.cache_dir = Path(cache_dir)
@@ -198,7 +198,7 @@ class DnaPack:
 
         @param force: 忽略刷新间隔，强制检查
         @return: 是否可用
-        @raises DnaError: 本地没有包且无法下载时抛出（调用方据此回退接口）
+        @raises DnaError: 本地没有包且无法下载时抛出（调用方据此回退在线查询）
         """
         async with self._lock:
             if self.is_ready() and not force and not self._need_check():
@@ -576,7 +576,7 @@ class DnaPack:
 
     def datasets_sync(self) -> list[dict]:
         """
-        全量数据集列表（结构对齐接口的 gameDataSets）。
+        全量数据集列表（结构对齐在线查询的 gameDataSets）。
 
         数据包里同名数据的具名导出（如 charext 的 charExtData 与 default 内容一致）会被折叠，
         否则列表里会出现一堆重复数据集；判重是轻量的「长度 + 首条记录键」比较。
@@ -686,7 +686,7 @@ class DnaPack:
 
         return dataset
 
-    # ------------------------------------------------------- 与接口一致的接口
+    # ------------------------------------------------------- 与在线查询一致的方法签名
 
     async def modules(self, refresh: bool = False) -> list[dict]:  # noqa: ARG002 - 保持与 DnaClient 同签名
         """模块列表（名字取本地快照表，缺失回退模块 id）。"""
@@ -729,7 +729,7 @@ class DnaPack:
         return [row for row in rows if row["baseId"] == base]
 
     async def resolve_dataset(self, name: str) -> tuple[str, str]:
-        """把名字解析成 (数据集 id, 模块 id)，规则与接口后端一致。"""
+        """把名字解析成 (数据集 id, 模块 id)，规则与在线查询后端一致。"""
         raw = (name or "").strip()
         if not raw:
             raise DnaError("必须提供数据集名（dataset）")
@@ -786,7 +786,7 @@ class DnaPack:
         offset: int = 0,
         sort: list[dict] | None = None,
     ) -> dict:
-        """本地检索（返回结构对齐接口）。"""
+        """本地检索（返回结构对齐在线查询）。"""
         local = self._dataset(dataset)
 
         return await asyncio.to_thread(

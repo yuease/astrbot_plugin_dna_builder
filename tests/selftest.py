@@ -1,5 +1,5 @@
 """
-离线自测：不启动 AstrBot，直接打真实资料库接口，验证数据层与工具层的输出。
+离线自测：不启动 AstrBot，直接打真实资料库在线服务，验证数据层与工具层的输出。
 
 用法（在插件目录下）：
 
@@ -155,7 +155,7 @@ async def main() -> int:
     except ImportError as exc:  # pragma: no cover
         check("工具层用例", True, f"跳过（{exc}）")
 
-    # 11. 本地数据包：下载、查询，并与接口结果逐项对比
+    # 11. 本地数据包：下载、查询，并与在线查询结果逐项对比
     #     缓存目录放系统临时目录，避免把 20MB 数据包写进插件仓库
     pack_dir = Path(tempfile.gettempdir()) / "astrbot_plugin_dna_builder_selftest_pack"
     pack = DnaPack(cache_dir=pack_dir, timeout=90)
@@ -163,7 +163,7 @@ async def main() -> int:
     try:
         await pack.ensure()
         pack_ready = pack.is_ready()
-    except Exception as exc:  # noqa: BLE001 - 数据包不可用时只提示，不影响接口用例
+    except Exception as exc:  # noqa: BLE001 - 数据包不可用时只提示，不影响在线查询用例
         check("本地数据包就绪", False, f"{exc}")
 
     if pack_ready:
@@ -179,7 +179,7 @@ async def main() -> int:
         check(
             "数据集清单一致",
             set(api_sets) == set(pack_sets),
-            f"接口 {len(api_sets)} / 本地 {len(pack_sets)}",
+            f"在线 {len(api_sets)} / 本地 {len(pack_sets)}",
         )
         check(
             "数据集条数与形态一致",

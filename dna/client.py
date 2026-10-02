@@ -2,10 +2,10 @@
 DNA Builder 数据访问层。
 
 数据来自 DNA Builder（简称 DOB，https://github.com/pa001024/dna-builder）对外提供的
-公开 GraphQL 接口，本模块只做「查询 + 元信息缓存 + 数据集名解析」，不依赖 AstrBot，
+公开 GraphQL 服务，本模块只做「查询 + 元信息缓存 + 数据集名解析」，不依赖 AstrBot，
 方便脱离机器人单独测试（见 tests/selftest.py）。
 
-接口能力（均取自 server/src/db/mod/gameData.ts 的 schema）：
+服务能力（均取自 server/src/db/mod/gameData.ts 的 schema）：
 
 - gameDataModules：可查询的模块列表（对应 src/data/d/*.data.ts），不加载数据，很轻；
 - gameDataSets：模块下的数据集（含记录数、语言变体）；
@@ -23,13 +23,13 @@ from typing import Any
 import httpx
 
 DEFAULT_ENDPOINT = "https://api.dna-builder.cn/graphql"
-"""DNA Builder 公开 GraphQL 接口；可在插件配置里用 api_endpoint 覆盖。"""
+"""DNA Builder 公开 GraphQL 服务；可在插件配置里用 api_endpoint 覆盖。"""
 
 META_TTL = 1800.0
 """模块 / 数据集元信息的进程内缓存时长（秒）。"""
 
 ALLOWED_FILTER_OPS = ("EQ", "NE", "CONTAINS", "IN", "EXISTS")
-"""接口支持的过滤算子（GameDataFilterOp 枚举）。"""
+"""服务端支持的过滤算子（GameDataFilterOp 枚举）。"""
 
 Q_MODULES = """
 query { gameDataModules { id label file baseId locale variants } }
@@ -96,7 +96,7 @@ class DnaClient:
         proxy: str = "",
     ) -> None:
         """
-        @param endpoint: GraphQL 接口地址
+        @param endpoint: GraphQL 服务地址
         @param timeout: 单次请求超时（秒）
         @param max_chars: 单次工具返回给模型的字符上限
         @param proxy: 可选 HTTP 代理地址

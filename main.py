@@ -9,8 +9,8 @@ AstrBot 插件：DOB 二重螺旋资料库（数据来自 DNA Builder，简称 D
 2. 指令（调试与手查）：/dna 帮助、/dna 模块、/dna 剧情 <关键词>、/dna 详情 <id>、
    /dna 查 <数据集> <关键词>、/dna 条目 <数据集> <key>。
 
-数据源有两种，可在配置里切换（默认 `auto`）：官方数据包（下载一次后本地查询，几乎不打作者接口）
-与 DNA Builder（https://github.com/pa001024/dna-builder）公开的 GraphQL 接口（实时）。
+数据源有两种，可在配置里切换（默认 `auto`）：官方数据包（下载一次后本地查询，几乎不请求在线服务）
+与 DNA Builder（https://github.com/pa001024/dna-builder）公开的实时在线查询（GraphQL）。
 两者都只读，插件不写入任何数据。
 """
 
@@ -49,7 +49,7 @@ HELP_TEXT = (
     "yuease",
     "基于 DOB（DNA Builder）的《二重螺旋》资料库查询：角色/武器/魔之楔等准确数据 + 剧情检索。",
     "1.2.0",
-    "https://github.com/pa001024/dna-builder",
+    "https://github.com/yuease/astrbot_plugin_dna_builder",
 )
 class DnaBuilderPlugin(Star):
     """插件主体：构造客户端、注册函数工具、提供调试指令。"""
@@ -254,7 +254,7 @@ class DnaBuilderPlugin(Star):
         status = self.client.status()
         lines = [
             f"数据源模式：{status['mode']}（当前使用：{status['active']}）",
-            f"实时接口：{status['endpoint']}",
+            f"实时在线查询：{status['endpoint']}",
         ]
 
         pack = status.get("pack")

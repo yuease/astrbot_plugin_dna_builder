@@ -1,14 +1,14 @@
 """
-本地数据集：把数据包里的各种导出形态归一成记录表，并复刻接口的检索语义。
+本地数据集：把数据包里的各种导出形态归一成记录表，并复刻在线查询的检索语义。
 
-官方数据包的模块导出有三种形态，接口把它们统一包装成 `{key, data}` 记录：
+官方数据包的模块导出有三种形态，在线查询把它们统一包装成 `{key, data}` 记录：
 
 - 数组（char / mod / weapon / questchain ...）→ 每条记录一个元素，key 取 id / 名称 / name；
 - 映射（storysummary 的 key→文本、questchain 的 key→版本）→ 每对键值一条记录，标量包成 `{"value": ...}`；
 - 其它标量 → 单条记录。
 
 筛选、全文匹配、排序、投影的语义都对齐 `server/src/db/mod/gameData.ts` 里那套定义，
-这样同一句查询在本地数据包和接口上会得到一致的结果（tests/selftest.py 里有对比用例）。
+这样同一句查询在本地数据包和在线查询上会得到一致的结果（tests/selftest.py 里有对比用例）。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def json_text(value: Any) -> str:
 
 def record_key(item: Any, index: int) -> str:
     """
-    取记录键，规则与接口一致：id → 名称 → name → 序号。
+    取记录键，规则与在线查询一致：id → 名称 → name → 序号。
 
     @param item: 记录主体
     @param index: 记录序号（兜底）
@@ -72,7 +72,7 @@ def project(data: Any, fields: list[str] | None) -> Any:
 
 def values_at(data: Any, path: str) -> list[Any]:
     """
-    按 `a.b` 路径取值，遇到数组自动下钻（对齐接口的字段路径语义）。
+    按 `a.b` 路径取值，遇到数组自动下钻（对齐在线查询的字段路径语义）。
 
     @param data: 记录主体
     @param path: 字段路径
@@ -172,7 +172,7 @@ def match_filter(data: Any, condition: dict) -> bool:
 
 def text_contains(node: Any, needle: str) -> bool:
     """
-    跨字段全文匹配：键名与标量值都参与，大小写不敏感（对齐接口语义）。
+    跨字段全文匹配：键名与标量值都参与，大小写不敏感（对齐在线查询语义）。
 
     @param node: 任意 JSON 节点
     @param needle: 已转小写的关键词
@@ -225,7 +225,7 @@ def _sort_key(item: dict, field: str) -> tuple:
 
 
 class LocalDataset:
-    """一份本地记录表，提供与接口一致的检索 / 取值 / 投影能力。"""
+    """一份本地记录表，提供与在线查询一致的检索 / 取值 / 投影能力。"""
 
     def __init__(
         self,
@@ -264,7 +264,7 @@ class LocalDataset:
         sort: list[dict] | None = None,
     ) -> dict:
         """
-        本地检索，返回结构与接口的 GameDataPage 对齐。
+        本地检索，返回结构与在线查询的 GameDataPage 对齐。
 
         @param query: 跨字段全文关键词
         @param filters: 过滤条件列表
@@ -326,7 +326,7 @@ class LocalDataset:
     def search_by_id(
         self, key: str, fields: list[str] | None = None, limit: int = 1
     ) -> dict:
-        """按 id 字段做一次检索（对应接口里带 fields 的 gameData 查询）。"""
+        """按 id 字段做一次检索（对应在线查询里带 fields 的 gameData 查询）。"""
         return self.search(
             filters=[{"field": "id", "op": "EQ", "value": key}],
             fields=fields,

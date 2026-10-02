@@ -31,7 +31,7 @@ logger = logging.getLogger("astrbot_plugin_dna_builder")
 
 
 def _text(client: Any, content: str) -> str:
-    """按配置的字符上限收敛工具返回文本（client 可为数据包或接口后端）。"""
+    """按配置的字符上限收敛工具返回文本（client 可为数据包或在线查询后端）。"""
     return clip(content, client.max_chars)
 
 

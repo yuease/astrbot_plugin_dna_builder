@@ -3,13 +3,13 @@
         "type": "string",
         "description": "数据源：auto / pack / api",
         "default": "auto",
-        "hint": "auto=优先用官方数据包（本地查询，几乎不打作者接口），没有就先用接口回答并在后台下载；pack=只用本地数据包；api=只用实时接口。"
+        "hint": "auto=优先用官方数据包（本地查询，几乎不请求在线服务），没有就先用在线查询回答并在后台下载；pack=只用本地数据包；api=只用实时在线查询。"
     },
     "api_endpoint": {
         "type": "string",
-        "description": "资料库 GraphQL 接口地址",
+        "description": "资料库 GraphQL 服务地址",
         "default": "https://api.dna-builder.cn/graphql",
-        "hint": "默认使用 DNA Builder 的公开接口。除非你有自建节点，否则不要改。"
+        "hint": "默认使用 DNA Builder 的公开实时服务。除非你有自建节点，否则不要改。"
     },
     "pack_base_url": {
         "type": "string",
@@ -33,7 +33,7 @@
         "type": "int",
         "description": "数据包体积上限（MB）",
         "default": 128,
-        "hint": "超过该体积就放弃下载并回落接口，防止异常包撑爆磁盘。"
+        "hint": "超过该体积就放弃下载并回落到在线查询，防止异常包撑爆磁盘。"
     },
     "timeout": {
         "type": "int",
