@@ -147,6 +147,7 @@ class DnaSearchDataTool(FunctionTool):
         "或模块中文名（角色 / 武器 / 魔之楔 / 怪物）。query 是跨字段全文匹配关键词（支持别名，如“蝴蝶”能搜到赛琪）；"
         "需要精确筛选时用 filters（取值先用 dna_list_field_values 查）；只返回关心的字段用 fields 降噪。"
         "拿到 key 后用 dna_get_entry 读完整字段。"
+        "注意：剧情 / 语音 / 角色档案这类文本内容用 dna_search_story 更合适（scope 可选 profile / voice / dialog）。"
     )
     parameters: dict = Field(
         default_factory=lambda: {
@@ -336,6 +337,8 @@ class DnaSearchStoryTool(FunctionTool):
         "跨剧情语料检索《二重螺旋》的故事内容，返回带出处的命中片段：剧情概要、任务链、角色语音、"
         "角色档案、书籍、光阴集；scope 含 dialog 时还会搜任务对话原文（体积大，按需用）。"
         "适合「谁说过什么」「哪段剧情提到 X」「某角色的故事」，也可用来找任务链 id。"
+        "返回的是证据片段，请据此直接回答用户的问题、不要只复述命中了几条；"
+        "需要某条剧情的完整概要或台词，再用 dna_read_story(chain_id=...)。"
     )
     parameters: dict = Field(
         default_factory=lambda: {

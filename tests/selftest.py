@@ -229,6 +229,38 @@ async def main() -> int:
             gateway.active_source == "pack",
             str(gateway.status()["pack"]["version"]),
         )
+
+        # 六个工具全部在本地数据包上跑一遍：真实故障就出在
+        # 「工具 → 网关 → 数据包」这条只有机器人走、脚本容易漏测的链路上
+        from dna.tools import build_tools
+
+        pack_tools = {tool.name: tool for tool in build_tools(gateway)}
+        tool_cases = [
+            ("dna_list_data_modules", {"keyword": "角色"}, "char（角色）"),
+            ("dna_search_data", {"dataset": "char", "query": "菲娜"}, "key=1801"),
+            ("dna_search_data", {"dataset": "角色", "query": "菲娜"}, "key=1801"),
+            (
+                "dna_search_data",
+                {"dataset": "mod", "query": "攻击", "limit": 2},
+                "key=",
+            ),
+            ("dna_get_entry", {"dataset": "char", "key": "1801"}, "菲娜"),
+            (
+                "dna_list_field_values",
+                {"dataset": "questchain", "field": "chapterName"},
+                "夜航篇",
+            ),
+            ("dna_search_story", {"query": "菲娜", "limit": 2}, "剧情概要"),
+            ("dna_read_story", {"chain_id": "100204"}, "剧情概要"),
+        ]
+        for tool_name, kwargs, expect in tool_cases:
+            output = await pack_tools[tool_name].call(None, **kwargs)
+            check(
+                f"本地工具 {tool_name} {kwargs}",
+                expect in output and "error" not in output[:12],
+                preview(output, 110),
+            )
+
         pack_story = await story.search_story(gateway, "贝蕾妮卡", scope="all", limit=2)
         check(
             "本地剧情检索可用",

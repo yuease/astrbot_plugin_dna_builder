@@ -33,7 +33,7 @@ from .store import LocalDataset, normalize
 DEFAULT_PACK_BASE_URL = "https://cdn.dobapp.cc/data-pack/"
 """官方数据包 CDN 基址（与 DOB 客户端一致，可在配置里覆盖成自建镜像）。"""
 
-USER_AGENT = "astrbot-plugin-dna-builder/1.2.0 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
+USER_AGENT = "astrbot-plugin-dna-builder/1.2.1 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
 
 MANIFEST_FILE = "manifest.json"
 VERSIONS_FILE = "versions.json"
@@ -428,9 +428,7 @@ class DnaPack:
         if not isinstance(value, dict):
             value = {"default": value}
 
-        base_id = (
-            module_key[: -len(".data")] if module_key.endswith(".data") else module_key
-        )
+        base_id = self._module_id_of(module_key)
         if base_id not in HEAVY_MODULES:
             self._modules[module_key] = value
             while len(self._modules) > MODULE_CACHE_SIZE:
@@ -452,11 +450,7 @@ class DnaPack:
 
         index: dict[str, tuple[str, str, str, int]] = {}
         for module_key in self._module_keys():
-            base_id = (
-                module_key[: -len(".data")]
-                if module_key.endswith(".data")
-                else module_key
-            )
+            base_id = self._module_id_of(module_key)
             exports, primary, values = self._queryable_exports(module_key)
             if not values:
                 continue
@@ -548,6 +542,11 @@ class DnaPack:
 
         return head if head and tail in _LOCALE_SUFFIXES else module_id
 
+    @staticmethod
+    def _module_id_of(module_key: str) -> str:
+        """模块键（char.data / quest.data）→ 模块 id（char / quest）。"""
+        return module_key.removesuffix(".data")
+
     def _module_locale(self, module_id: str) -> str:
         """取模块语言码（无后缀视为 zh）。"""
         _head, _, tail = module_id.rpartition(".")
@@ -566,12 +565,7 @@ class DnaPack:
                 _kind,
                 _count,
             ) in self._index().items()
-            if self._base_module_id(
-                module_key[: -len(".data")]
-                if module_key.endswith(".data")
-                else module_key
-            )
-            == base
+            if self._base_module_id(self._module_id_of(module_key)) == base
         ]
 
     def datasets_sync(self) -> list[dict]:
@@ -583,11 +577,7 @@ class DnaPack:
         """
         rows: list[dict] = []
         for dataset_id, (module_key, export, kind, count) in self._index().items():
-            module_id = (
-                module_key[: -len(".data")]
-                if module_key.endswith(".data")
-                else module_key
-            )
+            module_id = self._module_id_of(module_key)
             base_module = self._base_module_id(module_id)
 
             if dataset_id != module_id and self._is_duplicate_export(
@@ -673,9 +663,7 @@ class DnaPack:
         if value is None:
             raise DnaError(f"数据包模块 {module_key} 缺少导出 {export}")
 
-        module_id = (
-            module_key[: -len(".data")] if module_key.endswith(".data") else module_key
-        )
+        module_id = self._module_id_of(module_key)
         dataset = LocalDataset(
             dataset_id, module_id, normalize(value), export_name=export, kind=kind
         )
@@ -692,11 +680,7 @@ class DnaPack:
         """模块列表（名字取本地快照表，缺失回退模块 id）。"""
         rows: list[dict] = []
         for module_key in self._module_keys():
-            module_id = (
-                module_key[: -len(".data")]
-                if module_key.endswith(".data")
-                else module_key
-            )
+            module_id = self._module_id_of(module_key)
             base = self._base_module_id(module_id)
             rows.append(
                 {
@@ -706,12 +690,9 @@ class DnaPack:
                     "baseId": base,
                     "locale": self._module_locale(module_id),
                     "variants": sorted(
-                        key[: -len(".data")] if key.endswith(".data") else key
+                        self._module_id_of(key)
                         for key in self._module_keys()
-                        if self._base_module_id(
-                            key[: -len(".data")] if key.endswith(".data") else key
-                        )
-                        == base
+                        if self._base_module_id(self._module_id_of(key)) == base
                     ),
                 }
             )
@@ -742,12 +723,8 @@ class DnaPack:
 
         module_id = raw if raw in module_ids else label_to_id.get(raw)
         if module_id:
-            for dataset_id, (module_key, _export) in index.items():
-                if (
-                    module_key[: -len(".data")]
-                    if module_key.endswith(".data")
-                    else module_key
-                ) == module_id:
+            for dataset_id, (module_key, _export, _kind, _count) in index.items():
+                if self._module_id_of(module_key) == module_id:
                     return dataset_id, module_id
 
         if raw in index:
