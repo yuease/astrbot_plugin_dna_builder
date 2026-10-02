@@ -12,7 +12,6 @@ AstrBot 函数工具：把 dna 数据层包装成模型可直接调用的工具�
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from pydantic import Field
@@ -26,8 +25,6 @@ except Exception:  # pragma: no cover - 离线自测环境没有 astrbot
 
 from . import render, story
 from .client import ALLOWED_FILTER_OPS, DnaError, clip
-
-logger = logging.getLogger("astrbot_plugin_dna_builder")
 
 RELATED_STORY_DATASETS = {"char", "npc"}
 """这些数据集只装数值与设定，人物的档案 / 语音 / 剧情在别的表里，返回时提醒一句。"""
@@ -448,6 +445,5 @@ def build_tools(client: Any) -> list[Any]:
     ]
     for tool in tools:
         tool.client = client
-        logger.debug("注册 DNA Builder 工具：%s", tool.name)
 
     return tools

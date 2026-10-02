@@ -48,7 +48,7 @@ HELP_TEXT = (
     "astrbot_plugin_dna_builder",
     "yuease",
     "基于 DOB（DNA Builder）的《二重螺旋》资料库查询：角色/武器/魔之楔等准确数据 + 剧情检索。",
-    "1.2.2",
+    "1.2.3",
     "https://github.com/yuease/astrbot_plugin_dna_builder",
 )
 class DnaBuilderPlugin(Star):
@@ -82,7 +82,9 @@ class DnaBuilderPlugin(Star):
                 max_chars=max_chars,
             )
 
-        self.client = DnaGateway(self.api, self.pack, mode=mode, max_chars=max_chars)
+        self.client = DnaGateway(
+            self.api, self.pack, mode=mode, max_chars=max_chars, log=logger
+        )
         self.tools = build_tools(self.client)
 
         if cfg.get("enable_llm_tools", True):

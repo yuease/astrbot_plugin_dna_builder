@@ -14,18 +14,27 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Any
 
 from .client import DnaClient, DnaError
 from .pack import DnaPack
 
-logger = logging.getLogger("astrbot_plugin_dna_builder")
-
 MODE_AUTO = "auto"
 MODE_PACK = "pack"
 MODE_API = "api"
 VALID_MODES = (MODE_AUTO, MODE_PACK, MODE_API)
+
+
+class _SilentLogger:
+    """
+    离线自测（脱离 AstrBot 跑 tests/selftest.py）时的空日志器。
+
+    插件在 AstrBot 里运行时由 main.py 注入 `astrbot.api.logger`；这里不创建任何
+    logging 记录器，也不输出内容，只是为了在没有 AstrBot 的环境下也能实例化网关。
+    """
+
+    def __getattr__(self, _name: str):
+        return lambda *args, **kwargs: None
 
 
 class DnaGateway:
@@ -37,17 +46,20 @@ class DnaGateway:
         pack: DnaPack | None = None,
         mode: str = MODE_AUTO,
         max_chars: int = 2600,
+        log: Any = None,
     ) -> None:
         """
         @param api: 实时在线查询后端
         @param pack: 本地数据包后端（mode=api 时可为 None）
         @param mode: auto / pack / api
         @param max_chars: 工具返回字符上限
+        @param log: AstrBot 插件日志器（main.py 传入 `astrbot.api.logger`）；缺省时静默
         """
         self.api = api
         self.pack = pack
         self.mode = mode if mode in VALID_MODES else MODE_AUTO
         self.max_chars = max_chars
+        self._log = log if log is not None else _SilentLogger()
         self._warm_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------ 数据源选择
@@ -94,9 +106,9 @@ class DnaGateway:
         assert self.pack is not None
         try:
             await self.pack.ensure()
-            logger.info("DNA Builder 数据包已就绪：%s", self.pack.status())
+            self._log.info("DNA Builder 数据包已就绪：%s", self.pack.status())
         except Exception as exc:  # noqa: BLE001 - 后台任务不应抛到事件循环
-            logger.warning("DNA Builder 数据包下载失败，将继续使用在线查询：%s", exc)
+            self._log.warning("DNA Builder 数据包下载失败，将继续使用在线查询：%s", exc)
 
     def _should_use_pack(self) -> bool:
         """本次调用是否走本地数据包。"""
@@ -131,7 +143,7 @@ class DnaGateway:
                 pack_error = exc
                 if self.mode == MODE_PACK:
                     raise
-                logger.warning("本地数据包查询失败，回退在线查询：%s", exc)
+                self._log.warning("本地数据包查询失败，回退在线查询：%s", exc)
         else:
             self.start_warmup()
 
