@@ -25,13 +25,13 @@ except Exception:  # pragma: no cover - 离线自测环境没有 astrbot
     ToolExecResult = Any  # type: ignore[misc]
 
 from . import render, story
-from .client import ALLOWED_FILTER_OPS, DnaClient, DnaError, clip
+from .client import ALLOWED_FILTER_OPS, DnaError, clip
 
 logger = logging.getLogger("astrbot_plugin_dna_builder")
 
 
-def _text(client: DnaClient, content: str) -> str:
-    """按配置的字符上限收敛工具返回文本。"""
+def _text(client: Any, content: str) -> str:
+    """按配置的字符上限收敛工具返回文本（client 可为数据包或接口后端）。"""
     return clip(content, client.max_chars)
 
 
@@ -116,7 +116,7 @@ class DnaListModulesTool(FunctionTool):
         }
     )
     client: Any = None
-    """注入的 DnaClient（由插件在构造后赋值）。"""
+    """注入的数据源（DnaGateway / DnaClient / DnaPack，由插件在构造后赋值）。"""
 
     async def call(self, context: Any = None, **kwargs: Any) -> ToolExecResult:
         try:
@@ -415,11 +415,11 @@ class DnaReadStoryTool(FunctionTool):
         return _text(self.client, content)
 
 
-def build_tools(client: DnaClient) -> list[Any]:
+def build_tools(client: Any) -> list[Any]:
     """
     构造全部工具实例并注入客户端。
 
-    @param client: 资料库客户端
+    @param client: 资料库数据源（网关或任一后端）
     @return: 工具实例列表（可直接交给 context.add_llm_tools）
     """
     tools = [

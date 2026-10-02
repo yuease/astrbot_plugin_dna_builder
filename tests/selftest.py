@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dna import render, story  # noqa: E402
 from dna.client import DnaClient, DnaError  # noqa: E402
+from dna.gateway import DnaGateway  # noqa: E402
+from dna.pack import DnaPack  # noqa: E402
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -151,6 +154,90 @@ async def main() -> int:
         check("dna_read_story 调用", "剧情概要" in out, preview(out, 160))
     except ImportError as exc:  # pragma: no cover
         check("工具层用例", True, f"跳过（{exc}）")
+
+    # 11. 本地数据包：下载、查询，并与接口结果逐项对比
+    #     缓存目录放系统临时目录，避免把 20MB 数据包写进插件仓库
+    pack_dir = Path(tempfile.gettempdir()) / "astrbot_plugin_dna_builder_selftest_pack"
+    pack = DnaPack(cache_dir=pack_dir, timeout=90)
+    pack_ready = False
+    try:
+        await pack.ensure()
+        pack_ready = pack.is_ready()
+    except Exception as exc:  # noqa: BLE001 - 数据包不可用时只提示，不影响接口用例
+        check("本地数据包就绪", False, f"{exc}")
+
+    if pack_ready:
+        status = pack.status()
+        check(
+            "本地数据包就绪",
+            True,
+            f"v{status['version']}（{status['sizeMB']} MB，{status['builtAt'][:10]}）",
+        )
+
+        api_sets = {row["id"]: row for row in await client.datasets()}
+        pack_sets = {row["id"]: row for row in pack.datasets_sync()}
+        check(
+            "数据集清单一致",
+            set(api_sets) == set(pack_sets),
+            f"接口 {len(api_sets)} / 本地 {len(pack_sets)}",
+        )
+        check(
+            "数据集条数与形态一致",
+            all(
+                api_sets[key]["count"] == pack_sets[key]["count"]
+                and api_sets[key]["kind"] == pack_sets[key]["kind"]
+                for key in api_sets
+                if key in pack_sets
+            ),
+        )
+
+        for dataset, query in [
+            ("char", "贝蕾妮卡"),
+            ("mod", "攻击"),
+            ("achievement", "钓鱼"),
+        ]:
+            remote = await client.search(dataset, query=query, limit=5)
+            local = await pack.search(dataset, query=query, limit=5)
+            check(
+                f"检索一致 {dataset}/{query}",
+                remote["total"] == local["total"]
+                and [i["key"] for i in remote["items"]]
+                == [i["key"] for i in local["items"]],
+                f"total {remote['total']}",
+            )
+
+        for dataset, key in [
+            ("char", "1101"),
+            ("weapon", "10101"),
+            ("questchain", "100101"),
+        ]:
+            remote = await client.record(dataset, key)
+            local = await pack.record(dataset, key)
+            check(f"详情一致 {dataset}/{key}", remote == local)
+
+        remote_values = await client.field_values("questchain", "chapterName", limit=5)
+        local_values = await pack.field_values("questchain", "chapterName", limit=5)
+        check(
+            "筛选项一致 questchain.chapterName",
+            remote_values == local_values,
+            str([v["value"] for v in local_values]),
+        )
+
+        gateway = DnaGateway(DnaClient(timeout=30), pack, mode="pack")
+        check(
+            "网关切换到本地数据包",
+            gateway.active_source == "pack",
+            str(gateway.status()["pack"]["version"]),
+        )
+        pack_story = await story.search_story(gateway, "贝蕾妮卡", scope="all", limit=2)
+        check(
+            "本地剧情检索可用",
+            "剧情概要" in pack_story or "角色档案" in pack_story,
+            preview(pack_story, 140),
+        )
+        await gateway.aclose()
+
+    await pack.aclose()
 
     await client.aclose()
 

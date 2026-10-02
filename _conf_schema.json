@@ -1,9 +1,39 @@
 {
+    "data_source": {
+        "type": "string",
+        "description": "数据源：auto / pack / api",
+        "default": "auto",
+        "hint": "auto=优先用官方数据包（本地查询，几乎不打作者接口），没有就先用接口回答并在后台下载；pack=只用本地数据包；api=只用实时接口。"
+    },
     "api_endpoint": {
         "type": "string",
         "description": "资料库 GraphQL 接口地址",
         "default": "https://api.dna-builder.cn/graphql",
         "hint": "默认使用 DNA Builder 的公开接口。除非你有自建节点，否则不要改。"
+    },
+    "pack_base_url": {
+        "type": "string",
+        "description": "官方数据包 CDN 地址",
+        "default": "https://cdn.dobapp.cc/data-pack/",
+        "hint": "与 DOB 客户端一致的数据包源，约 20MB，只下载不频繁请求。可换成自建镜像。"
+    },
+    "pack_refresh_hours": {
+        "type": "int",
+        "description": "数据包更新检查间隔（小时）",
+        "default": 12,
+        "hint": "每隔这么久检查一次 versions.json（几 KB），有新版本才重新下载。设为 0 表示不主动检查。"
+    },
+    "pack_timeout": {
+        "type": "int",
+        "description": "数据包下载超时（秒）",
+        "default": 60,
+        "hint": "网络慢可调大。"
+    },
+    "pack_max_mb": {
+        "type": "int",
+        "description": "数据包体积上限（MB）",
+        "default": 128,
+        "hint": "超过该体积就放弃下载并回落接口，防止异常包撑爆磁盘。"
     },
     "timeout": {
         "type": "int",

@@ -9,12 +9,14 @@ AstrBot 插件：DOB 二重螺旋资料库（数据来自 DNA Builder，简称 D
 2. 指令（调试与手查）：/dna 帮助、/dna 模块、/dna 剧情 <关键词>、/dna 详情 <id>、
    /dna 查 <数据集> <关键词>、/dna 条目 <数据集> <key>。
 
-数据源是 DNA Builder（https://github.com/pa001024/dna-builder）公开的 GraphQL 接口，
-本插件只读、带缓存，不写入任何数据。
+数据源有两种，可在配置里切换（默认 `auto`）：官方数据包（下载一次后本地查询，几乎不打作者接口）
+与 DNA Builder（https://github.com/pa001024/dna-builder）公开的 GraphQL 接口（实时）。
+两者都只读，插件不写入任何数据。
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
@@ -23,6 +25,8 @@ from astrbot.api.star import Context, Star, register
 
 from .dna import render, story
 from .dna.client import DEFAULT_ENDPOINT, DnaClient, DnaError, clip
+from .dna.gateway import DnaGateway
+from .dna.pack import DEFAULT_PACK_BASE_URL, DnaPack
 from .dna.tools import build_tools
 
 COMMAND_MAX_CHARS = 1500
@@ -35,6 +39,7 @@ HELP_TEXT = (
     "/dna 详情 <任务链id> [台词] — 剧情概要 + 章节信息（加「台词」附带对话原文）\n"
     "/dna 查 <数据集> <关键词> — 结构化检索，例如 /dna 查 char 贝蕾妮卡\n"
     "/dna 条目 <数据集> <key> — 读一条记录的完整字段\n"
+    "/dna 数据包 — 查看数据源模式与本地数据包状态（可手动触发下载）\n"
     "直接说需求（例如「芙罗拉的技能是什么」）也可以，模型会自己调用工具查。"
 )
 
@@ -43,7 +48,7 @@ HELP_TEXT = (
     "astrbot_plugin_dna_builder",
     "yuease",
     "基于 DOB（DNA Builder）的《二重螺旋》资料库查询：角色/武器/魔之楔等准确数据 + 剧情检索。",
-    "1.1.0",
+    "1.2.0",
     "https://github.com/pa001024/dna-builder",
 )
 class DnaBuilderPlugin(Star):
@@ -57,12 +62,27 @@ class DnaBuilderPlugin(Star):
         super().__init__(context)
 
         cfg = config or {}
-        self.client = DnaClient(
+        max_chars = int(cfg.get("max_chars") or 2600)
+        self.api = DnaClient(
             endpoint=str(cfg.get("api_endpoint") or DEFAULT_ENDPOINT),
             timeout=cfg.get("timeout") or 20,
-            max_chars=cfg.get("max_chars") or 2600,
+            max_chars=max_chars,
             proxy=str(cfg.get("proxy") or ""),
         )
+
+        mode = str(cfg.get("data_source") or "auto").strip().lower()
+        self.pack: DnaPack | None = None
+        if mode != "api":
+            self.pack = DnaPack(
+                cache_dir=self._pack_cache_dir(),
+                base_url=str(cfg.get("pack_base_url") or DEFAULT_PACK_BASE_URL),
+                timeout=cfg.get("pack_timeout") or 60,
+                refresh_hours=cfg.get("pack_refresh_hours") or 12,
+                max_mb=cfg.get("pack_max_mb") or 128,
+                max_chars=max_chars,
+            )
+
+        self.client = DnaGateway(self.api, self.pack, mode=mode, max_chars=max_chars)
         self.tools = build_tools(self.client)
 
         if cfg.get("enable_llm_tools", True):
@@ -71,6 +91,29 @@ class DnaBuilderPlugin(Star):
             logger.info(
                 "已按配置跳过函数工具注册（enable_llm_tools=false），/dna 指令仍可用。"
             )
+
+    @staticmethod
+    def _pack_cache_dir() -> Path:
+        """
+        数据包缓存目录：优先放 AstrBot 的插件数据目录（升级 / 重装插件不会丢），
+        拿不到时退回插件自身目录下的 cache。
+
+        @return: 缓存目录
+        """
+        try:
+            from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
+
+            return (
+                Path(get_astrbot_plugin_data_path())
+                / "astrbot_plugin_dna_builder"
+                / "data-pack"
+            )
+        except Exception:  # noqa: BLE001 - 各版本路径 API 有差异，退回插件目录
+            return Path(__file__).resolve().parent / "cache" / "data-pack"
+
+    async def initialize(self):
+        """插件加载后启动数据包预热（auto / pack 模式才会真的下载）。"""
+        self.client.start_warmup()
 
     # ------------------------------------------------------------------ 注册
 
@@ -196,8 +239,45 @@ class DnaBuilderPlugin(Star):
 
             return render.render_record(record, dataset_id, key.strip())
 
+        if head in ("数据包", "pack", "数据源", "source"):
+            return self._pack_status()
+
         # 默认把整段当成剧情关键词，最贴近日常问法
         return await story.search_story(self.client, argument, scope="all", limit=3)
+
+    def _pack_status(self) -> str:
+        """
+        数据源与本地数据包状态；没有数据包时顺手触发一次后台下载。
+
+        @return: 状态文本
+        """
+        status = self.client.status()
+        lines = [
+            f"数据源模式：{status['mode']}（当前使用：{status['active']}）",
+            f"实时接口：{status['endpoint']}",
+        ]
+
+        pack = status.get("pack")
+        if not pack:
+            lines.append("本地数据包：未启用（data_source=api）")
+
+            return "\n".join(lines)
+
+        if pack["ready"]:
+            lines.append(
+                f"本地数据包：已就绪 v{pack['version']}（构建于 {pack['builtAt'][:10]}，{pack['sizeMB']} MB）"
+            )
+        elif status.get("downloading"):
+            lines.append("本地数据包：下载中…（完成后自动切换为本地查询）")
+        else:
+            self.client.start_warmup()
+            lines.append("本地数据包：未就绪，已开始后台下载（约 20 MB，来自官方 CDN）")
+
+        lines.append(f"缓存目录：{pack['cacheDir']}")
+        if pack.get("lastError"):
+            lines.append(f"最近错误：{pack['lastError']}")
+
+        return "\n".join(lines)
 
     # ---------------------------------------------------------------- 生命周期
 

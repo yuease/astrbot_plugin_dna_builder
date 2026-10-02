@@ -180,7 +180,8 @@ async def main() -> int:
     module = importlib.import_module(f"{PACKAGE_NAME}.main")
 
     context = FakeContext()
-    plugin = module.DnaBuilderPlugin(context, {"timeout": 30})
+    # data_source=api：只验证装配与指令，测试期间不去下载 20MB 数据包
+    plugin = module.DnaBuilderPlugin(context, {"timeout": 30, "data_source": "api"})
 
     check("插件构造", plugin is not None)
     check("注册了 2 个指令", sorted(HANDLERS) == ["dna", "螺旋"], str(sorted(HANDLERS)))
@@ -188,6 +189,11 @@ async def main() -> int:
         "注册了 6 个工具",
         len(context.registered) == 6,
         ", ".join(t.name for t in context.registered),
+    )
+    check(
+        "数据源模式生效",
+        plugin.client.mode == "api" and plugin.pack is None,
+        str(plugin.client.status()["mode"]),
     )
 
     # 工具基类会用 jsonschema 校验 parameters（真实 AstrBot 同样会校验）
@@ -227,6 +233,9 @@ async def main() -> int:
         "剧情概要" in detail and "任务链" in detail,
         detail.splitlines()[0][:60],
     )
+
+    pack_status = await plugin._handle("数据包")
+    check("/dna 数据包", "数据源模式" in pack_status, pack_status.splitlines()[0][:60])
 
     # 事件路径（验证 plain_result 真的被调用）
     event = sys.modules["astrbot.api.event"].AstrMessageEvent("/dna 剧情 贝蕾妮卡")
