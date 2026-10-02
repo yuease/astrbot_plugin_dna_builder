@@ -48,7 +48,7 @@ HELP_TEXT = (
     "astrbot_plugin_dna_builder",
     "yuease",
     "基于 DOB（DNA Builder）的《二重螺旋》资料库查询：角色/武器/魔之楔等准确数据 + 剧情检索。",
-    "1.2.1",
+    "1.2.2",
     "https://github.com/yuease/astrbot_plugin_dna_builder",
 )
 class DnaBuilderPlugin(Star):

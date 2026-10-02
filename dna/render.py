@@ -72,6 +72,52 @@ def to_json(
     )
 
 
+IDENTITY_FIELDS = ("id", "key", "名称", "name")
+"""无论怎么裁剪都要保留的身份字段。"""
+
+
+def compact_record(
+    data: Any,
+    *,
+    item_chars: int = 800,
+    str_limit: int = 240,
+    list_limit: int = 6,
+) -> tuple[Any, list[str]]:
+    """
+    把一条记录压到指定体积：先递归收缩，再按字段体积从大到小整块丢弃。
+
+    搜索结果只需要「认得出是哪一条」；技能树 / 突破 / 升级这类大字段会把上下文占满
+    （实测角色记录 4.7KB，大半是技能与材料），完整内容留给 dna_get_entry。
+
+    @param data: 记录主体
+    @param item_chars: 单条记录的目标字符上限
+    @param str_limit: 字符串字段保留长度
+    @param list_limit: 数组字段保留项数
+    @return: (裁剪后的记录, 被整块省略的字段名列表)
+    """
+    if not isinstance(data, dict):
+        return shrink(data, str_limit, list_limit), []
+
+    kept = {key: shrink(value, str_limit, list_limit) for key, value in data.items()}
+    sizes = {
+        key: len(json.dumps(value, ensure_ascii=False)) for key, value in kept.items()
+    }
+    total = sum(sizes.values())
+    omitted: list[str] = []
+
+    for key in sorted(sizes, key=lambda name: -sizes[name]):
+        if total <= item_chars:
+            break
+        if key in IDENTITY_FIELDS:
+            continue
+
+        omitted.append(key)
+        total -= sizes[key]
+        del kept[key]
+
+    return kept, omitted
+
+
 def render_modules(
     modules: list[dict], datasets: list[dict], keyword: str = "", limit: int = 40
 ) -> str:
@@ -138,13 +184,22 @@ def render_modules(
     )
 
 
-def render_page(page: dict, str_limit: int = 300, list_limit: int = 8) -> str:
+def render_page(
+    page: dict,
+    str_limit: int = 240,
+    list_limit: int = 6,
+    item_chars: int = 800,
+) -> str:
     """
-    渲染 gameData 分页结果。
+    渲染 gameData 分页结果（摘要视图）。
+
+    每条记录都会被压到 `item_chars` 以内：过大的字段整块省略并列出字段名，
+    提示模型按需用 dna_get_entry 取完整内容。这样一次检索不会因为几条大记录就吃掉整个上下文。
 
     @param page: gameData 返回的 GameDataPage
     @param str_limit: 单字段字符串上限
     @param list_limit: 数组字段保留项数上限
+    @param item_chars: 单条记录目标字符上限
     @return: 供模型阅读的文本
     """
     dataset = page.get("dataset") or ""
@@ -159,10 +214,20 @@ def render_page(page: dict, str_limit: int = 300, list_limit: int = 8) -> str:
     ]
     for index, item in enumerate(items, start=1):
         lines.append(f"{index}) key={item.get('key')}")
-        lines.append("   " + to_json(item.get("data"), str_limit, list_limit))
+        compact, omitted = compact_record(
+            item.get("data"),
+            item_chars=item_chars,
+            str_limit=str_limit,
+            list_limit=list_limit,
+        )
+        lines.append(
+            "   " + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+        )
+        if omitted:
+            lines.append(f"   （省略字段：{'、'.join(omitted)}）")
 
     lines.append(
-        f'提示：需要完整字段时用 dna_get_entry(dataset="{dataset}", key=<上面的 key>)。'
+        f'提示：以上是摘要。需要完整字段（含被省略的）用 dna_get_entry(dataset="{dataset}", key=<上面的 key>)。'
     )
 
     return "\n".join(lines)

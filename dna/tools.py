@@ -29,6 +29,15 @@ from .client import ALLOWED_FILTER_OPS, DnaError, clip
 
 logger = logging.getLogger("astrbot_plugin_dna_builder")
 
+RELATED_STORY_DATASETS = {"char", "npc"}
+"""这些数据集只装数值与设定，人物的档案 / 语音 / 剧情在别的表里，返回时提醒一句。"""
+
+RELATED_STORY_HINT = (
+    "\n\n相关：这个人物还有角色档案、语音与剧情文本，用 dna_search_story"
+    "（scope 可选 profile 档案 / voice 语音 / summary 剧情概要 / dialog 对话原文）查，"
+    "不要只看 char 表就下结论。"
+)
+
 
 def _text(client: Any, content: str) -> str:
     """按配置的字符上限收敛工具返回文本（client 可为数据包或在线查询后端）。"""
@@ -215,7 +224,11 @@ class DnaSearchDataTool(FunctionTool):
         except DnaError as exc:
             return _error(exc)
 
-        return _text(self.client, render.render_page(page, str_limit=300, list_limit=8))
+        content = render.render_page(page, str_limit=240, list_limit=6)
+        if dataset in RELATED_STORY_DATASETS:
+            content += RELATED_STORY_HINT
+
+        return _text(self.client, content)
 
 
 @dataclass

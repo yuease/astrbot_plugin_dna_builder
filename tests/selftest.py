@@ -261,6 +261,20 @@ async def main() -> int:
                 preview(output, 110),
             )
 
+        char_hits = await pack_tools["dna_search_data"].call(
+            None, dataset="char", query="菲娜"
+        )
+        check(
+            "搜索结果压成摘要",
+            len(char_hits) < 1500 and "省略字段" in char_hits,
+            f"{len(char_hits)} 字",
+        )
+        check(
+            "角色检索带档案/剧情线索",
+            "dna_search_story" in char_hits and "profile" in char_hits,
+            preview(char_hits[-160:], 160),
+        )
+
         pack_story = await story.search_story(gateway, "贝蕾妮卡", scope="all", limit=2)
         check(
             "本地剧情检索可用",

@@ -33,7 +33,7 @@ from .store import LocalDataset, normalize
 DEFAULT_PACK_BASE_URL = "https://cdn.dobapp.cc/data-pack/"
 """官方数据包 CDN 基址（与 DOB 客户端一致，可在配置里覆盖成自建镜像）。"""
 
-USER_AGENT = "astrbot-plugin-dna-builder/1.2.1 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
+USER_AGENT = "astrbot-plugin-dna-builder/1.2.2 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
 
 MANIFEST_FILE = "manifest.json"
 VERSIONS_FILE = "versions.json"
