@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import types
 from pathlib import Path
@@ -21,6 +22,26 @@ import jsonschema
 from pydantic.dataclasses import dataclass
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
+
+
+def plugin_package_name() -> str:
+    """
+    从 metadata.yaml 读插件标识作为包名。
+
+    AstrBot 安装时目录名就是插件名，但直接 `git clone` 下来的目录名可能是仓库名，
+    所以这里显式构造一个同名包指向插件目录，保证两种情况下都能导入 main.py。
+    """
+    try:
+        text = (PLUGIN_DIR / "metadata.yaml").read_text(encoding="utf-8")
+    except OSError:
+        return PLUGIN_DIR.name
+
+    match = re.search(r"(?m)^name:\s*(\S+)\s*$", text)
+
+    return match.group(1) if match else PLUGIN_DIR.name
+
+
+PACKAGE_NAME = plugin_package_name()
 sys.path.insert(0, str(PLUGIN_DIR.parent))
 
 HANDLERS: list[str] = []
@@ -151,7 +172,12 @@ async def main() -> int:
 
     import importlib
 
-    module = importlib.import_module("astrbot_plugin_dna_builder.main")
+    # 目录名与插件名不一致时（例如 clone 下来的仓库目录），挂一个同名包指向插件目录
+    package = types.ModuleType(PACKAGE_NAME)
+    package.__path__ = [str(PLUGIN_DIR)]
+    sys.modules.setdefault(PACKAGE_NAME, package)
+
+    module = importlib.import_module(f"{PACKAGE_NAME}.main")
 
     context = FakeContext()
     plugin = module.DnaBuilderPlugin(context, {"timeout": 30})
