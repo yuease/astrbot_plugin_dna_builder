@@ -1,0 +1,98 @@
+# DOB 二重螺旋资料库（astrbot_plugin_dna_builder）
+
+基于 **DOB（[DNA Builder](https://github.com/pa001024/dna-builder)）** 的《二重螺旋》资料库插件：
+让 AstrBot（QQ / 其他平台）里的机器人能查到**准确数据**，而不是靠模型记忆编。
+包括结构化数据（角色 / 武器 / 魔之楔 / 怪物 / 成就 / 密函 …）和**剧情内容**（剧情概要、任务链、
+角色语音、角色档案、书籍、光阴集、任务对话原文）。
+
+数据来自 [DNA Builder](https://github.com/pa001024/dna-builder)（简称 DOB）对外提供的公开
+GraphQL 接口 `https://api.dna-builder.cn/graphql`。本插件**只读**，不写入任何数据。
+
+## 安装
+
+1. 把整个 `astrbot_plugin_dna_builder` 目录放进 AstrBot 的 `data/plugins/` 下；
+   或者把打包好的 zip 直接丢进 WebUI 插件页的「安装插件」。
+2. 重启 / 重载插件。插件目录里有 `requirements.txt`（只依赖 `httpx`），AstrBot 会自动装。
+3. 到 WebUI 的 `插件 → 管理行为 → 函数工具` 确认这些工具是启用状态：
+
+   `dna_list_data_modules`、`dna_search_data`、`dna_get_entry`、`dna_list_field_values`、
+   `dna_search_story`、`dna_read_story`
+
+4. 要用自然语言自动查资料，当前会话用的模型必须支持 function calling（DeepSeek V3.x、
+   Qwen3、GLM-4.x、GPT-5.x、Claude 4.x、Gemini 3.x 均可）。
+
+要求 AstrBot `>= 4.5.7`（工具用的是 `FunctionTool.call()` 新接口）。
+
+## 指令（手查 / 调试）
+
+| 指令 | 说明 |
+| --- | --- |
+| `/dna` 或 `/dna 帮助` | 用法说明 |
+| `/dna 模块 [关键词]` | 列出可查询的模块与数据集（79 个模块） |
+| `/dna 剧情 <关键词>` | 跨剧情概要 / 任务链 / 语音 / 档案检索，返回带出处的片段 |
+| `/dna 详情 <任务链id> [台词]` | 剧情概要 + 章节信息；带「台词」时附对话原文（含说话人） |
+| `/dna 查 <数据集> <关键词>` | 结构化检索，例如 `/dna 查 char 贝蕾妮卡` |
+| `/dna 条目 <数据集> <key>` | 读一条记录的完整字段 |
+| `/螺旋 <关键词>` | `/dna` 的中文别名 |
+
+不写指令、直接问也可以（例如「芙罗拉的技能和CV是什么」「贝蕾妮卡的剧情线讲了什么」），
+模型会自己选择工具调用。
+
+## 工具设计
+
+工具面按「先发现、再检索、最后读详情」分层，这是从 DNA Builder 的资料检索 Agent 里学来的：
+列表类工具只回摘要 + `key`，详情用另一个工具按 `key` 取，避免一次把大 JSON 灌进上下文。
+
+| 工具 | 作用 | 关键参数 |
+| --- | --- | --- |
+| `dna_list_data_modules` | 模块 / 数据集总览（带缓存） | `keyword`、`limit` |
+| `dna_search_data` | 指定数据集全文检索 + 精确过滤 + 字段投影 | `dataset`、`query`、`filters`、`fields`、`limit`、`offset` |
+| `dna_get_entry` | 按 key 读完整记录 | `dataset`、`key`、`fields` |
+| `dna_list_field_values` | 字段去重取值（构造 filters 用） | `dataset`、`field` |
+| `dna_search_story` | 跨剧情语料检索，返回出处 + 片段 | `query`、`scope`、`limit` |
+| `dna_read_story` | 按任务链 id 组装概要 + 章节 +（可选）台词 | `chain_id`、`include_dialogue`、`max_dialogues` |
+
+几个实现细节：
+
+- `dataset` 支持三种写法：数据集 id（`char`）、模块 id（`mod`）、模块中文名（`角色` / `魔之楔`）；
+- 剧情检索自动给概要补上「哪一章 · 哪一节 · 任务链名」，给语音 / 档案补上角色名；
+- 台词里的 `{nickname}`、`{性别：她|他}` 这类占位符会被收敛成「你」「她/他」；
+- 所有输出都做递归收缩（长字符串、长数组）并受 `max_chars` 限制，单条工具结果不会撑爆上下文。
+
+## 配置
+
+WebUI 插件配置页（`_conf_schema.json`）：
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `api_endpoint` | `https://api.dna-builder.cn/graphql` | 资料库接口地址，一般不用改 |
+| `timeout` | `20` | 单次查询超时（秒） |
+| `max_chars` | `2600` | 单次工具返回字符上限 |
+| `proxy` | 空 | 可选 HTTP 代理 |
+| `enable_llm_tools` | `true` | 关闭后模型不自动查，但 `/dna` 指令仍可用 |
+
+## 自测
+
+不启动 AstrBot 也能验证数据链路（会打真实接口）：
+
+```bash
+python tests/selftest.py
+```
+
+会检查模块列表、数据集名解析、检索、详情、筛选项、剧情检索、台词说话人解析、错误处理
+以及六个工具的调用与 JSON Schema 合法性。
+
+## 已知限制
+
+- 剧情对话原文（`quest`）单条记录 5~8KB，`dna_search_story` 默认不搜它，需要时显式传
+  `scope="dialog"` / `scope="对话"`；
+- 接口一次只能查一个数据集，没有跨数据集全文搜索；跨模块找线索请用 `dna_search_story`，
+  或先用 `dna_list_data_modules` 定位模块；
+- QQ 单条消息长度有限，指令回复截断到 1500 字（可改 `main.py` 里的 `COMMAND_MAX_CHARS`）；
+- 资料库是第三方公共服务，请勿高频轮询；本插件已对模块 / 数据集元信息做了 30 分钟缓存。
+
+## 致谢与许可
+
+- 数据与接口：[DNA Builder](https://github.com/pa001024/dna-builder)（MIT），插件的工具分层、
+  提示词写法参考了该项目 `src/api/agent/` 的资料检索 Agent 设计；
+- 本插件代码可自由修改分发，请遵守上游项目的许可与使用约定。

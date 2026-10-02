@@ -1,0 +1,32 @@
+{
+    "api_endpoint": {
+        "type": "string",
+        "description": "资料库 GraphQL 接口地址",
+        "default": "https://api.dna-builder.cn/graphql",
+        "hint": "默认使用 DNA Builder 的公开接口。除非你有自建节点，否则不要改。"
+    },
+    "timeout": {
+        "type": "int",
+        "description": "单次查询超时时间（秒）",
+        "default": 20,
+        "hint": "网络较慢可调大，建议 10~30。"
+    },
+    "max_chars": {
+        "type": "int",
+        "description": "单次工具返回的字符上限",
+        "default": 2600,
+        "hint": "工具结果会进入模型上下文，太大既费 token 又容易让模型跑偏；建议 1500~4000。"
+    },
+    "proxy": {
+        "type": "string",
+        "description": "可选 HTTP 代理",
+        "default": "",
+        "hint": "留空表示直连，例如 http://127.0.0.1:7890。"
+    },
+    "enable_llm_tools": {
+        "type": "bool",
+        "description": "注册函数工具（让模型自动调用）",
+        "default": true,
+        "hint": "关闭后模型不会自动查资料，但 /dna 指令仍然可用；模型不支持 function calling 时可关闭。"
+    }
+}

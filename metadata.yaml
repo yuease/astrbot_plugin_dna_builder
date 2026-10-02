@@ -1,0 +1,15 @@
+name: astrbot_plugin_dna_builder
+display_name: DOB 二重螺旋资料库
+desc: 基于 DOB（DNA Builder）的《二重螺旋》资料库查询插件：角色 / 武器 / 魔之楔 / 怪物 / 成就等结构化字段，以及剧情概要、任务链、角色语音与档案，数据全部取自 DOB 公开接口。
+short_desc: 基于 DOB 的二重螺旋数据与剧情查询
+version: v1.1.0
+author: yuease
+repo: https://github.com/yuease/astrbot_plugin_dna_builder
+social_link: https://github.com/yuease
+tags:
+  - 二重螺旋
+  - 游戏
+  - 资料库
+  - 剧情
+  - 查询
+astrbot_version: ">=4.5.7"

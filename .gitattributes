@@ -1,0 +1,9 @@
+# 统一用 LF 换行（AstrBot 多数部署在 Linux / Docker 上）
+* text=auto eol=lf
+
+# 二进制资源不做换行转换
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.zip binary
