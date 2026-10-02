@@ -5,8 +5,8 @@
 包括结构化数据（角色 / 武器 / 魔之楔 / 怪物 / 成就 / 密函 …）和**剧情内容**（剧情概要、任务链、
 角色语音、角色档案、书籍、光阴集、任务对话原文）。
 
-数据来自 [DNA Builder](https://github.com/pa001024/dna-builder)（简称 DOB）对外提供的公开
-GraphQL 接口 `https://api.dna-builder.cn/graphql`。本插件**只读**，不写入任何数据。
+数据来自 DOB 官方发布的**数据包**：下载一次（约 22 MB）缓存在本地，之后所有查询都在本地完成，
+既快，也不会给作者的服务器添负担。插件**只读**，不写入任何数据。
 
 ## 安装
 
@@ -21,6 +21,8 @@ GraphQL 接口 `https://api.dna-builder.cn/graphql`。本插件**只读**，不�
 
 4. 要用自然语言自动查资料，当前会话用的模型必须支持 function calling（DeepSeek V3.x、
    Qwen3、GLM-4.x、GPT-5.x、Claude 4.x、Gemini 3.x 均可）。
+
+第一次查询时插件会自动下载约 22 MB 的官方数据包（见下一节），之后就是纯本地查询。
 
 要求 AstrBot `>= 4.5.7`（工具用的是 `FunctionTool.call()` 新接口）。
 
@@ -40,25 +42,35 @@ GraphQL 接口 `https://api.dna-builder.cn/graphql`。本插件**只读**，不�
 不写指令、直接问也可以（例如「芙罗拉的技能和CV是什么」「贝蕾妮卡的剧情线讲了什么」），
 模型会自己选择工具调用。
 
-## 数据源（本地数据包 / 实时接口）
+## 数据包（数据从哪来）
 
-默认 `data_source: auto`：**优先用官方数据包在本地查**，实在没有才打接口，并且第一次用的时候
-会在后台把数据包下下来，之后所有查询都不再经过作者的服务器。
+插件默认**不查任何接口**，而是用 DOB 官方发布的**数据包**在本地查询。
 
-数据包就是 DOB 客户端自己用的那份（`https://cdn.dobapp.cc/data-pack/`，Cloudflare CDN，
-zip 内是 msgpack 编好的各模块数据，当前版本约 22 MB）。下载一次、缓存在 AstrBot 的插件数据目录，
-之后按 `pack_refresh_hours` 隔一段时间检查一次版本（只请求几 KB 的 `versions.json`），
-有新版本才重新下载。
+- **来源**：`https://cdn.dobapp.cc/data-pack/`——就是 DOB 桌面版 / 移动端自己在用的那份，
+  托管在 Cloudflare CDN 上；
+- **内容**：zip 里是 msgpack 编好的各模块数据（角色 / 武器 / 魔之楔 / 怪物 / 成就 / 任务链 /
+  剧情 / 语音 / 档案 …，共 79 个模块、165 个数据集），当前版本约 **22 MB**；
+- **缓存**：下载一次存在 AstrBot 的插件数据目录
+  （`data/plugin_data/astrbot_plugin_dna_builder/data-pack/`），重装 / 升级插件都不会丢；
+- **更新**：每 12 小时请求一次几 KB 的 `versions.json`，只有出现新版本才会重新下载。
+  作者发版很勤（实现那天正好有一版新包）；
+- **查询**：全部在本地解码检索，实测单次几毫秒到几十毫秒，剧情跨表检索也不用等网络。
+
+也就是说，联网只发生在「版本检查」和「偶尔一次数据包下载」上，而且都走 CDN，
+作者的中转服务器完全不受影响。用 `/dna 数据包` 可以随时看当前版本、构建时间与缓存位置。
+
+插件也保留了**实时接口**模式作为可选项（走 `api.dna-builder.cn` 的公开 GraphQL 接口，
+每次查询联网、数据永远最新），用配置项 `data_source` 切换：
 
 | 模式 | 行为 | 适合 |
 | --- | --- | --- |
-| `auto`（默认） | 数据包就绪就用本地；否则先用接口回答并在后台下载，下好自动切换 | 绝大多数情况 |
-| `pack` | 只用本地数据包，没有就现下（首次查询会等一次下载） | 想彻底不打作者接口 |
-| `api` | 只用实时接口，每次查询都打 `api.dna-builder.cn` | 需要绝对最新的数据，或磁盘紧张 |
+| `auto`（默认） | 数据包就绪就用本地；第一次还没下好时先用接口回答，同时后台下载，下好自动切本地 | 绝大多数情况 |
+| `pack` | 只用本地数据包，没有就现下 | 想彻底不碰作者服务器 |
+| `api` | 只用实时接口 | 需要绝对最新的内容，或磁盘特别紧张 |
 
-两者数据是一套东西（同一份数据由作者打包），插件里的检索、详情、剧情、筛选项在两种数据源上
-**结果一致**——`tests/selftest.py` 会把同一批查询分别跑一遍接口与数据包逐项比对：
-数据集清单 165/165、条数与形态、检索命中与 total、整条记录逐字段、字段取值统计。
+两种数据源给出的结果是同一份（只是取法不同），`tests/selftest.py` 会把同一批查询在两条路上
+各跑一遍逐项比对——数据集清单 165/165、条数与形态、检索 total 与命中项、整条记录逐字段、
+字段取值统计，全部一致。
 
 ## 工具设计
 
@@ -88,7 +100,6 @@ WebUI 插件配置页（`_conf_schema.json`）：
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
 | `data_source` | `auto` | `auto` / `pack` / `api`，见上一节 |
-| `api_endpoint` | `https://api.dna-builder.cn/graphql` | 资料库接口地址，一般不用改 |
 | `pack_base_url` | `https://cdn.dobapp.cc/data-pack/` | 官方数据包 CDN，可换成自建镜像 |
 | `pack_refresh_hours` | `12` | 数据包更新检查间隔（小时），`0` 表示不主动检查 |
 | `pack_timeout` | `60` | 数据包下载超时（秒） |
@@ -97,10 +108,11 @@ WebUI 插件配置页（`_conf_schema.json`）：
 | `max_chars` | `2600` | 单次工具返回字符上限 |
 | `proxy` | 空 | 可选 HTTP 代理 |
 | `enable_llm_tools` | `true` | 关闭后模型不自动查，但 `/dna` 指令仍可用 |
+| `api_endpoint` | `https://api.dna-builder.cn/graphql` | 仅在 `api` / `auto` 兜底时用到的实时接口地址 |
 
 ## 自测
 
-不启动 AstrBot 也能验证数据链路（会打真实接口）：
+不启动 AstrBot 也能验证整条数据链路：
 
 ```bash
 python tests/selftest.py
@@ -114,16 +126,17 @@ python tests/selftest.py
 
 - 剧情对话原文（`quest`）单条记录 5~8KB，`dna_search_story` 默认不搜它，需要时显式传
   `scope="dialog"` / `scope="对话"`；
-- 接口一次只能查一个数据集，没有跨数据集全文搜索；跨模块找线索请用 `dna_search_story`，
+- 数据的新鲜度以作者发布数据包为准（`/dna 数据包` 能看到当前版本与构建时间）；需要绝对
+  最新的内容，把 `data_source` 设成 `api` 走实时接口；
+- 一次查询只针对一个数据集，没有跨数据集全文搜索；跨模块找线索请用 `dna_search_story`，
   或先用 `dna_list_data_modules` 定位模块；
-- 本地数据包模式的数据新鲜度以作者发版为准（`/dna 数据包` 可看到当前版本与构建时间），
-  需要绝对最新的内容把 `data_source` 设成 `api`；
 - 多语言翻译表（`translations`，17 MB）不进内存缓存，只有显式查它才解码；
 - QQ 单条消息长度有限，指令回复截断到 1500 字（可改 `main.py` 里的 `COMMAND_MAX_CHARS`）；
-- 无论哪种模式都请别高频轮询：接口模式对元信息做了 30 分钟缓存，数据包模式只有版本检查会联网。
+- 数据包模式联网极少（只有版本检查与下载）；如果切到 `api` 模式，也请别高频轮询，
+  插件对元信息做了 30 分钟缓存。
 
 ## 致谢与许可
 
-- 数据与接口：[DNA Builder](https://github.com/pa001024/dna-builder)（MIT），插件的工具分层、
-  提示词写法参考了该项目 `src/api/agent/` 的资料检索 Agent 设计；
+- 数据来源：[DNA Builder](https://github.com/pa001024/dna-builder) 官方数据包（该项目 MIT 协议），
+  插件也支持它的公开实时接口；工具分层与提示词写法参考了该项目 `src/api/agent/` 的资料检索 Agent 设计；
 - 本插件代码可自由修改分发，请遵守上游项目的许可与使用约定。
