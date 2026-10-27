@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from typing import Any
 
 from .client import DnaClient, DnaError
@@ -61,6 +62,7 @@ class DnaGateway:
         self.max_chars = max_chars
         self._log = log if log is not None else _SilentLogger()
         self._warm_task: asyncio.Task | None = None
+        self._refresh_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------ 数据源选择
 
@@ -88,27 +90,48 @@ class DnaGateway:
 
         return info
 
-    def start_warmup(self) -> None:
-        """启动后台下载数据包（重复调用无副作用）。"""
+    def start_warmup(self, force: bool = False) -> None:
+        """启动到期检查或首次下载，并维持定时检查；force 可手动检查。"""
         if self.pack is None or self.mode == MODE_API:
             return
 
-        if self.pack.is_ready() or (self._warm_task and not self._warm_task.done()):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # 没有事件循环时不强求，首次查询会再试
             return
 
-        try:
-            self._warm_task = asyncio.get_running_loop().create_task(self._warm_pack())
-        except RuntimeError:  # 没有事件循环时不强求，首次查询会再试
-            self._warm_task = None
+        if self.pack.refresh_hours > 0 and (
+            self._refresh_task is None or self._refresh_task.done()
+        ):
+            self._refresh_task = loop.create_task(self._refresh_loop())
 
-    async def _warm_pack(self) -> None:
-        """后台下载数据包，失败只记日志。"""
+        if self._warm_task and not self._warm_task.done():
+            return
+        if not force and not self.pack.needs_update():
+            return
+
+        self._warm_task = loop.create_task(self._warm_pack(force=force))
+
+    async def _refresh_loop(self) -> None:
+        """每分钟检查本地计时，到期后才请求版本清单。"""
+        while True:
+            await asyncio.sleep(60)
+            self.start_warmup()
+
+    async def _warm_pack(self, force: bool = False) -> None:
+        """后台检查或下载数据包，失败只记日志并保留旧包。"""
         assert self.pack is not None
         try:
-            await self.pack.ensure()
-            self._log.info("DNA Builder 数据包已就绪：%s", self.pack.status())
+            await self.pack.ensure(force=force)
+            if self.pack.last_error:
+                self._log.warning(
+                    "DNA Builder 数据包更新失败，继续使用本地数据包：%s",
+                    self.pack.last_error,
+                )
+            else:
+                self._log.info("DNA Builder 数据包已就绪：%s", self.pack.status())
         except Exception as exc:  # noqa: BLE001 - 后台任务不应抛到事件循环
-            self._log.warning("DNA Builder 数据包下载失败，将继续使用在线查询：%s", exc)
+            self._log.warning("DNA Builder 数据包检查或下载失败：%s", exc)
 
     def _should_use_pack(self) -> bool:
         """本次调用是否走本地数据包。"""
@@ -137,6 +160,7 @@ class DnaGateway:
             await self.pack.ensure()  # 失败直接抛出，提示用户数据包不可用
 
         if self._should_use_pack():
+            self.start_warmup()
             try:
                 return await getattr(self.pack, method)(*args, **kwargs)
             except DnaError as exc:
@@ -205,8 +229,14 @@ class DnaGateway:
 
     async def aclose(self) -> None:
         """释放两个后端的连接。"""
-        if self._warm_task and not self._warm_task.done():
-            self._warm_task.cancel()
+        tasks = [task for task in (self._refresh_task, self._warm_task) if task]
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task
+        self._refresh_task = None
+        self._warm_task = None
         await self.api.aclose()
         if self.pack is not None:
             await self.pack.aclose()

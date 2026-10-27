@@ -39,7 +39,7 @@ HELP_TEXT = (
     "/dna 详情 <任务链id> [台词] — 剧情概要 + 章节信息（加「台词」附带对话原文）\n"
     "/dna 查 <数据集> <关键词> — 结构化检索，例如 /dna 查 char 贝蕾妮卡\n"
     "/dna 条目 <数据集> <key> — 读一条记录的完整字段\n"
-    "/dna 数据包 — 查看数据源模式与本地数据包状态（可手动触发下载）\n"
+    "/dna 数据包 [更新] — 查看状态；加「更新」立即在后台检查新版本\n"
     "直接说需求（例如「芙罗拉的技能是什么」）也可以，模型会自己调用工具查。"
 )
 
@@ -48,7 +48,7 @@ HELP_TEXT = (
     "astrbot_plugin_dna_builder",
     "yuease",
     "基于 DOB（DNA Builder）的《二重螺旋》资料库查询：角色/武器/魔之楔等准确数据 + 剧情检索。",
-    "1.2.3",
+    "1.2.4",
     "https://github.com/yuease/astrbot_plugin_dna_builder",
 )
 class DnaBuilderPlugin(Star):
@@ -77,7 +77,7 @@ class DnaBuilderPlugin(Star):
                 cache_dir=self._pack_cache_dir(),
                 base_url=str(cfg.get("pack_base_url") or DEFAULT_PACK_BASE_URL),
                 timeout=cfg.get("pack_timeout") or 60,
-                refresh_hours=cfg.get("pack_refresh_hours") or 12,
+                refresh_hours=cfg.get("pack_refresh_hours", 12),
                 max_mb=cfg.get("pack_max_mb") or 128,
                 max_chars=max_chars,
             )
@@ -242,17 +242,20 @@ class DnaBuilderPlugin(Star):
             return render.render_record(record, dataset_id, key.strip())
 
         if head in ("数据包", "pack", "数据源", "source"):
-            return self._pack_status()
+            return self._pack_status(
+                force=rest.lower() in ("更新", "update", "refresh")
+            )
 
         # 默认把整段当成剧情关键词，最贴近日常问法
         return await story.search_story(self.client, argument, scope="all", limit=3)
 
-    def _pack_status(self) -> str:
+    def _pack_status(self, force: bool = False) -> str:
         """
-        数据源与本地数据包状态；没有数据包时顺手触发一次后台下载。
+        数据源与本地数据包状态；触发到期检查，force 可忽略更新间隔。
 
         @return: 状态文本
         """
+        self.client.start_warmup(force=force)
         status = self.client.status()
         lines = [
             f"数据源模式：{status['mode']}（当前使用：{status['active']}）",
@@ -269,6 +272,8 @@ class DnaBuilderPlugin(Star):
             lines.append(
                 f"本地数据包：已就绪 v{pack['version']}（构建于 {pack['builtAt'][:10]}，{pack['sizeMB']} MB）"
             )
+            if status.get("downloading"):
+                lines.append("正在后台检查或更新数据包，完成后自动使用新版本。")
         elif status.get("downloading"):
             lines.append("本地数据包：下载中…（完成后自动切换为本地查询）")
         else:

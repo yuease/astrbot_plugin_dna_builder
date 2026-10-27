@@ -33,7 +33,7 @@ from .store import LocalDataset, normalize
 DEFAULT_PACK_BASE_URL = "https://cdn.dobapp.cc/data-pack/"
 """官方数据包 CDN 基址（与 DOB 客户端一致，可在配置里覆盖成自建镜像）。"""
 
-USER_AGENT = "astrbot-plugin-dna-builder/1.2.3 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
+USER_AGENT = "astrbot-plugin-dna-builder/1.2.4 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
 
 MANIFEST_FILE = "manifest.json"
 VERSIONS_FILE = "versions.json"
@@ -71,7 +71,7 @@ class DnaPack:
         self.base = (base_url or DEFAULT_PACK_BASE_URL).rstrip("/") + "/"
         self.cache_dir = Path(cache_dir)
         self.timeout = max(5.0, float(timeout or 60.0))
-        self.refresh_hours = max(0.0, float(refresh_hours or 12.0))
+        self.refresh_hours = max(0.0, float(12.0 if refresh_hours is None else refresh_hours))
         self.max_bytes = max(1, int(max_mb or 128)) * 1024 * 1024
         self.max_chars = max(500, int(max_chars or 2600))
 
@@ -204,27 +204,27 @@ class DnaPack:
             if self.is_ready() and not force and not self._need_check():
                 return True
 
+            # 失败也记录本次尝试，避免后续每次查询都重试网络请求。
+            self.checked_at = time.time()
             try:
                 versions = await self._fetch_versions()
-            except DnaError as exc:
-                if self.is_ready():  # 已经在用旧包，检查失败不影响使用
-                    self.last_error = str(exc)
+                latest = versions[0]
 
-                    return True
-
-                raise
-
-            latest = versions[0]
-            self.checked_at = time.time()
-
-            if latest.get("version") == self.version and self.is_ready():
+                if latest.get("version") != self.version or not self.is_ready():
+                    await self._install(latest)
+                self.last_error = ""
+            except (DnaError, httpx.HTTPError) as exc:
+                self.last_error = str(exc)
+                if not self.is_ready():
+                    raise DnaError(self.last_error) from exc
+            finally:
                 self._save_state()
 
-                return True
-
-            await self._install(latest)
-
             return True
+
+    def needs_update(self) -> bool:
+        """是否需要首次下载或到了更新检查时间。"""
+        return not self.is_ready() or self._need_check()
 
     def _need_check(self) -> bool:
         """是否到了下一次版本检查时间。"""
@@ -300,7 +300,7 @@ class DnaPack:
 
     async def _download(self, url: str, target: Path) -> int:
         """
-        下载数据包：先试整包流式下载，若 CDN 返回空体则退回分片下载。
+        下载数据包：先试整包流式下载，空体或传输中断时退回分片下载。
 
         （实测该 CDN 对整包 GET 会返回 200 但空体，Range 请求正常，因此必须保留两条路径）
 
@@ -336,15 +336,15 @@ class DnaPack:
                     async for chunk in response.aiter_bytes(1 << 20):
                         handle.write(chunk)
                         written += len(chunk)
-        except httpx.HTTPError as exc:
-            raise DnaError(f"数据包下载失败：{exc}") from exc
+        except httpx.HTTPError:
+            return 0  # CDN 中途断开时也要走 Range 兜底，覆盖已写入的残包
 
         return written
 
     async def _download_ranged(self, url: str, dest: Path) -> int:
-        """分片下载（Range），用于 CDN 整包请求返回空体的情况。"""
+        """分片下载（Range），用于 CDN 整包请求空体或传输中断的情况。"""
         client = await self._client()
-        chunk_size = 4 << 20
+        chunk_size = 256 << 10
 
         probe = await client.get(url, headers={"Range": "bytes=0-0"})
         content_range = probe.headers.get("content-range") or ""
@@ -360,12 +360,24 @@ class DnaPack:
         with dest.open("wb") as handle:
             while written < total:
                 end = min(written + chunk_size - 1, total - 1)
-                response = await client.get(
-                    url, headers={"Range": f"bytes={written}-{end}"}
-                )
-                response.raise_for_status()
-                if not response.content:
-                    break
+                for attempt in range(3):
+                    try:
+                        response = await client.get(
+                            url, headers={"Range": f"bytes={written}-{end}"}
+                        )
+                        response.raise_for_status()
+                        break
+                    except httpx.HTTPError as exc:
+                        if attempt == 2:
+                            raise DnaError(f"数据包分片下载失败：{exc}") from exc
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                expected_range = f"bytes {written}-{end}/{total}"
+                if (
+                    response.status_code != 206
+                    or response.headers.get("content-range") != expected_range
+                    or len(response.content) != end - written + 1
+                ):
+                    raise DnaError("数据包分片不完整或范围不匹配，请稍后重试")
                 handle.write(response.content)
                 written += len(response.content)
 
