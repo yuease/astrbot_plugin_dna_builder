@@ -51,7 +51,7 @@
         "type": "string",
         "description": "可选 HTTP 代理",
         "default": "",
-        "hint": "留空表示直连，例如 http://127.0.0.1:7890。"
+        "hint": "在线查询和数据包下载共用此代理；留空时使用运行环境的网络设置。例如 http://127.0.0.1:7890。"
     },
     "enable_llm_tools": {
         "type": "bool",

@@ -33,7 +33,7 @@ from .store import LocalDataset, normalize
 DEFAULT_PACK_BASE_URL = "https://cdn.dobapp.cc/data-pack/"
 """官方数据包 CDN 基址（与 DOB 客户端一致，可在配置里覆盖成自建镜像）。"""
 
-USER_AGENT = "astrbot-plugin-dna-builder/1.2.4 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
+USER_AGENT = "astrbot-plugin-dna-builder/1.2.5 (+https://github.com/yuease/astrbot_plugin_dna_builder)"
 
 MANIFEST_FILE = "manifest.json"
 VERSIONS_FILE = "versions.json"
@@ -48,6 +48,12 @@ DATASET_CACHE_SIZE = 12
 _LOCALE_SUFFIXES = ("en", "fr", "jp", "kr", "tc")
 
 
+def error_detail(exc: Exception) -> str:
+    """保留异常类型，避免 AssertionError / TimeoutError 等空消息丢失原因。"""
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 class DnaPack:
     """官方数据包的下载、缓存与查询实现（行为与 DnaClient 对齐）。"""
 
@@ -59,6 +65,7 @@ class DnaPack:
         refresh_hours: float = 12.0,
         max_mb: int = 128,
         max_chars: int = 2600,
+        proxy: str = "",
     ) -> None:
         """
         @param cache_dir: 数据包缓存目录（插件数据目录下）
@@ -67,6 +74,7 @@ class DnaPack:
         @param refresh_hours: 间隔多久去检查一次新版本
         @param max_mb: 允许下载的数据包体积上限（MB）
         @param max_chars: 单次工具返回字符上限（与在线查询后端保持一致）
+        @param proxy: 可选 HTTP 代理，与在线查询使用相同配置
         """
         self.base = (base_url or DEFAULT_PACK_BASE_URL).rstrip("/") + "/"
         self.cache_dir = Path(cache_dir)
@@ -74,12 +82,14 @@ class DnaPack:
         self.refresh_hours = max(0.0, float(12.0 if refresh_hours is None else refresh_hours))
         self.max_bytes = max(1, int(max_mb or 128)) * 1024 * 1024
         self.max_chars = max(500, int(max_chars or 2600))
+        self.proxy = (proxy or "").strip()
 
         self.version = ""
         self.built_at = ""
         self.package_file = ""
         self.checked_at = 0.0
         self.last_error = ""
+        self.update_stage = ""
 
         self._http: httpx.AsyncClient | None = None
         self._manifest_cache: dict | None = None
@@ -112,6 +122,7 @@ class DnaPack:
         self.built_at = str(state.get("builtAt") or "")
         self.package_file = str(state.get("packageFile") or "")
         self.checked_at = float(state.get("checkedAt") or 0)
+        self.last_error = str(state.get("lastError") or "")
 
         if self.version and not self.zip_path.exists():
             self.version = ""
@@ -127,6 +138,7 @@ class DnaPack:
                         "builtAt": self.built_at,
                         "packageFile": self.package_file,
                         "checkedAt": self.checked_at,
+                        "lastError": self.last_error,
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -164,6 +176,7 @@ class DnaPack:
             "cacheDir": str(self.cache_dir),
             "sizeMB": round(size / 1048576, 1),
             "lastError": self.last_error,
+            "updateStage": self.update_stage,
         }
 
     async def _client(self) -> httpx.AsyncClient:
@@ -173,6 +186,7 @@ class DnaPack:
                 timeout=httpx.Timeout(self.timeout),
                 headers={"User-Agent": USER_AGENT},
                 follow_redirects=True,
+                proxy=self.proxy or None,
             )
 
         return self._http
@@ -207,17 +221,22 @@ class DnaPack:
             # 失败也记录本次尝试，避免后续每次查询都重试网络请求。
             self.checked_at = time.time()
             try:
+                self.update_stage = "获取版本清单"
                 versions = await self._fetch_versions()
                 latest = versions[0]
 
                 if latest.get("version") != self.version or not self.is_ready():
                     await self._install(latest)
                 self.last_error = ""
-            except (DnaError, httpx.HTTPError) as exc:
-                self.last_error = str(exc)
-                if not self.is_ready():
+            except Exception as exc:  # 记录所有异常；未知异常继续抛给网关输出堆栈
+                self.last_error = f"{self.update_stage}失败：{error_detail(exc)}"
+                if (
+                    not isinstance(exc, (DnaError, httpx.HTTPError, OSError))
+                    or not self.is_ready()
+                ):
                     raise DnaError(self.last_error) from exc
             finally:
+                self.update_stage = ""
                 self._save_state()
 
             return True
@@ -231,16 +250,25 @@ class DnaPack:
         if self.refresh_hours <= 0:
             return False
 
-        return time.time() - self.checked_at > self.refresh_hours * 3600
+        interval = self.refresh_hours * 3600
+        if self.last_error:
+            interval = min(interval, 300)  # 失败后五分钟重试，不再等待完整的十二小时
+        return time.time() - self.checked_at > interval
 
     async def _fetch_versions(self) -> list[dict]:
         """取版本列表（最新在前）。"""
         client = await self._client()
 
-        try:
-            response = await client.get(f"{self.base}{VERSIONS_FILE}")
-        except httpx.HTTPError as exc:
-            raise DnaError(f"数据包版本列表获取失败：{exc}") from exc
+        for attempt in range(3):
+            try:
+                response = await client.get(f"{self.base}{VERSIONS_FILE}")
+                break
+            except httpx.HTTPError as exc:
+                if attempt == 2:
+                    raise DnaError(
+                        f"数据包版本列表获取失败：{error_detail(exc)}"
+                    ) from exc
+                await asyncio.sleep(0.5 * (attempt + 1))
 
         if response.status_code != 200:
             raise DnaError(f"数据包版本列表返回 HTTP {response.status_code}")
@@ -267,6 +295,7 @@ class DnaPack:
         url = f"{self.base}{package_file}"
 
         if not target.exists() or target.stat().st_size == 0:
+            self.update_stage = f"下载数据包 v{version}"
             size = await self._download(url, target)
             if size > self.max_bytes:
                 target.unlink(missing_ok=True)
@@ -274,6 +303,7 @@ class DnaPack:
                     f"数据包体积 {size / 1048576:.1f}MB 超过上限，已放弃下载"
                 )
 
+        self.update_stage = f"校验数据包 v{version}"
         manifest = self._read_manifest(target)
         if not manifest:
             target.unlink(missing_ok=True)
@@ -369,7 +399,9 @@ class DnaPack:
                         break
                     except httpx.HTTPError as exc:
                         if attempt == 2:
-                            raise DnaError(f"数据包分片下载失败：{exc}") from exc
+                            raise DnaError(
+                                f"数据包分片下载失败：{error_detail(exc)}"
+                            ) from exc
                         await asyncio.sleep(0.5 * (attempt + 1))
                 expected_range = f"bytes {written}-{end}/{total}"
                 if (

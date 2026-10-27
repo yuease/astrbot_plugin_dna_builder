@@ -18,7 +18,7 @@ from contextlib import suppress
 from typing import Any
 
 from .client import DnaClient, DnaError
-from .pack import DnaPack
+from .pack import DnaPack, error_detail
 
 MODE_AUTO = "auto"
 MODE_PACK = "pack"
@@ -131,7 +131,12 @@ class DnaGateway:
             else:
                 self._log.info("DNA Builder 数据包已就绪：%s", self.pack.status())
         except Exception as exc:  # noqa: BLE001 - 后台任务不应抛到事件循环
-            self._log.warning("DNA Builder 数据包检查或下载失败：%s", exc)
+            if not self.pack.last_error:
+                self.pack.last_error = error_detail(exc)
+                self.pack._save_state()
+            self._log.exception(
+                "DNA Builder 数据包检查或下载失败：%s", self.pack.last_error
+            )
 
     def _should_use_pack(self) -> bool:
         """本次调用是否走本地数据包。"""

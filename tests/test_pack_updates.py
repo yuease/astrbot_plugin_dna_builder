@@ -16,7 +16,7 @@ import types
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
@@ -139,7 +139,63 @@ class PackUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.pack.ensure())
         self.assertEqual(self.pack.version, "old")
         self.assertTrue(self.pack.is_ready())
-        self.assertEqual(self.pack.last_error, "download failed")
+        self.assertIn("下载数据包 vnew", self.pack.last_error)
+        self.assertIn("DnaError: download failed", self.pack.last_error)
+
+    async def test_empty_unexpected_error_is_logged_and_persisted(self):
+        self.pack._fetch_versions = AsyncMock(side_effect=AssertionError())
+        self.gateway._log = Mock()
+        self.gateway.start_warmup()
+        await self.finish_update()
+        self.assertIn("获取版本清单失败", self.pack.last_error)
+        self.assertIn("AssertionError", self.pack.last_error)
+        self.assertEqual(self.pack.version, "old")
+        self.gateway._log.exception.assert_called_once()
+        reloaded = DnaPack(self.temp.name)
+        self.assertEqual(reloaded.last_error, self.pack.last_error)
+        self.addAsyncCleanup(reloaded.aclose)
+
+    async def test_failed_update_retries_after_five_minutes(self):
+        self.pack.last_error = "previous failure"
+        self.pack.checked_at = time.time() - 301
+        self.assertTrue(self.pack.needs_update())
+        self.pack.checked_at = time.time() - 299
+        self.assertFalse(self.pack.needs_update())
+        self.pack.refresh_hours = 0
+        self.pack.checked_at = 0
+        self.assertFalse(self.pack.needs_update())
+
+    async def test_empty_http_error_still_has_a_visible_type(self):
+        self.pack._download = AsyncMock(side_effect=httpx.ReadTimeout(""))
+        await self.pack.ensure()
+        self.assertIn("ReadTimeout", self.pack.last_error)
+        self.assertTrue(self.pack.is_ready())
+
+    async def test_transient_version_request_failure_is_retried(self):
+        attempts = 0
+
+        async def respond(request):
+            nonlocal attempts
+            if request.url.path.endswith("versions.json"):
+                attempts += 1
+                if attempts < 3:
+                    raise httpx.ConnectError("")
+            return await self.respond(request)
+
+        await self.pack._http.aclose()
+        self.pack._http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with patch("dna.pack.asyncio.sleep", new_callable=AsyncMock):
+            await self.pack.ensure()
+        self.assertEqual(attempts, 3)
+        self.assertEqual(self.pack.version, "new")
+
+    async def test_proxy_is_applied_to_http_client(self):
+        await self.pack.aclose()
+        self.pack.proxy = "http://127.0.0.1:7890"
+        with patch("dna.pack.httpx.AsyncClient") as client:
+            await self.pack._client()
+            self.assertEqual(client.call_args.kwargs["proxy"], self.pack.proxy)
+        self.pack._http = None
 
     async def test_interrupted_stream_falls_back_to_complete_ranges(self):
         data = package("new")
@@ -283,9 +339,11 @@ class PluginUpdateTests(unittest.IsolatedAsyncioTestCase):
         ):
             plugin = module.DnaBuilderPlugin(import_check.FakeContext(), {
                 "pack_refresh_hours": 0, "enable_llm_tools": False,
+                "proxy": "http://127.0.0.1:7890",
             })
             self.addAsyncCleanup(plugin.terminate)
             self.assertEqual(plugin.pack.refresh_hours, 0)
+            self.assertEqual(plugin.pack.proxy, plugin.api.proxy)
             with patch.object(plugin.client, "start_warmup") as warmup:
                 text = await plugin._handle("数据包 更新")
                 self.assertIn("数据源模式", text)

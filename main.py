@@ -48,7 +48,7 @@ HELP_TEXT = (
     "astrbot_plugin_dna_builder",
     "yuease",
     "基于 DOB（DNA Builder）的《二重螺旋》资料库查询：角色/武器/魔之楔等准确数据 + 剧情检索。",
-    "1.2.4",
+    "1.2.5",
     "https://github.com/yuease/astrbot_plugin_dna_builder",
 )
 class DnaBuilderPlugin(Star):
@@ -80,6 +80,7 @@ class DnaBuilderPlugin(Star):
                 refresh_hours=cfg.get("pack_refresh_hours", 12),
                 max_mb=cfg.get("pack_max_mb") or 128,
                 max_chars=max_chars,
+                proxy=str(cfg.get("proxy") or ""),
             )
 
         self.client = DnaGateway(
@@ -273,7 +274,8 @@ class DnaBuilderPlugin(Star):
                 f"本地数据包：已就绪 v{pack['version']}（构建于 {pack['builtAt'][:10]}，{pack['sizeMB']} MB）"
             )
             if status.get("downloading"):
-                lines.append("正在后台检查或更新数据包，完成后自动使用新版本。")
+                stage = pack.get("updateStage") or "准备检查"
+                lines.append(f"正在后台更新：{stage}，完成后自动使用新版本。")
         elif status.get("downloading"):
             lines.append("本地数据包：下载中…（完成后自动切换为本地查询）")
         else:
